@@ -2,6 +2,7 @@ import time
 import logging
 from typing import Deque, Optional
 from collections import deque
+from datetime import timedelta
 
 from asyncua import ua
 from ..ua.ua_binary import nodeid_from_binary, struct_from_binary, struct_to_binary, uatcp_to_binary
@@ -54,12 +55,22 @@ class UaProcessor:
             # it will break the Secure channel renewal.
             self._connection.select_policy(
                 algohdr.SecurityPolicyURI, algohdr.SenderCertificate, request.Parameters.SecurityMode)
-
-        channel = self._connection.open(request.Parameters, self.iserver)
-        # send response
-        response = ua.OpenSecureChannelResponse()
-        response.Parameters = channel
-        self.send_response(request.RequestHeader.RequestHandle, seqhdr, response, ua.MessageType.SecureOpen)
+        if self.internal_server.open_secure_channel >= self.interal_server._limits.MaxSecureChannel:
+            # @FIXME try to remove the oldest secure channel without a session!
+            raise ServiceError(ua.StatusCodes.BadMaxConnectionsReached)
+        else:
+            self.internal_server.open_secure_channel += 1
+            requestedLifetime = timedelta(milliseconds=request.Parameters.requestedLifetime)
+            if requestedLifetime < self.iserver._limits.MinSecureChannelLifeTime:
+                requestedLifetime = self.iserver._limits.MinSecureChannelLifeTime
+            else:
+                requestedLifetime = min(requestedLifetime, self.iserver._limits.MaxSessionTime)
+            request.Parameters.requestedLifetime = requestedLifetime.total_seconds() * 1000
+            channel = self._connection.open(request.Parameters, self.iserver)
+            # send response
+            response = ua.OpenSecureChannelResponse()
+            response.Parameters = channel
+            self.send_response(request.RequestHeader.RequestHandle, seqhdr, response, ua.MessageType.SecureOpen)
 
     async def forward_publish_response(self, result: ua.PublishResult):
         """
@@ -431,6 +442,7 @@ class UaProcessor:
         elif typeid == ua.NodeId(ua.ObjectIds.CloseSecureChannelRequest_Encoding_DefaultBinary):
             _logger.info("close secure channel request (%s)", user)
             self._connection.close()
+            self.iserver.secure_channel_count -= 1
             response = ua.CloseSecureChannelResponse()
             self.send_response(requesthdr.RequestHandle, seqhdr, response)
             return False
@@ -485,3 +497,6 @@ class UaProcessor:
         _logger.info("Cleanup client connection: %s", self.name)
         if self.session:
             await self.session.close_session(True)
+        if self._connection.is_open():
+            # decrement secure channel count
+            self.iserver.secure_channel_count -= 1

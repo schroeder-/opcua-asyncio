@@ -10,7 +10,7 @@ from struct import unpack_from
 import os
 import logging
 from urllib.parse import urlparse
-from typing import Coroutine, Tuple
+from typing import Coroutine
 
 from asyncua import ua
 from .user_managers import PermissiveUserManager, UserManager
@@ -22,6 +22,7 @@ from .subscription_service import SubscriptionService
 from .standard_address_space import standard_address_space
 from .users import User, UserRole
 from .internal_session import InternalSession
+from .config import ServerLimits
 
 try:
     from asyncua.crypto import uacrypto
@@ -74,6 +75,8 @@ class InternalServer:
         self._time_task_stop = False
         self.match_discovery_source_ip: bool = True
         self.supported_tokens = []
+        self._limits: ServerLimits = None
+        self.secure_channel_count = 0
 
     async def init(self, shelffile=None):
         await self.load_standard_address_space(shelffile)
@@ -306,7 +309,7 @@ class InternalServer:
         """
         directly read datavalue of the Attribute
         """
-        return self.aspace.read_attribute_value(nodeid, attr)  
+        return self.aspace.read_attribute_value(nodeid, attr)
 
     def set_user_manager(self, user_manager):
         """

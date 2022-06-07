@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 from enum import Enum
 from typing import Coroutine, Iterable, Optional
@@ -20,8 +21,7 @@ class InternalSession:
     """
 
     """
-    max_connections = 1000
-    _current_connections = 0
+    _current_sessions = 0
     _counter = 10
     _auth_counter = 1000
 
@@ -56,7 +56,12 @@ class InternalSession:
         result = ua.CreateSessionResult()
         result.SessionId = self.session_id
         result.AuthenticationToken = self.auth_token
-        result.RevisedSessionTimeout = params.RequestedSessionTimeout
+        session_timeout = timedelta(milliseconds=params.RequestedSessionTimeout)
+        if session_timeout < self.iserver._limits.MinSessionTime:
+            session_timeout = self.iserver._limits.MinSessionTime
+        else:
+            session_timeout = min(session_timeout, self.iserver._limits.MaxSessionTime)
+        result.RevisedSessionTimeout = session_timeout.total_seconds() * 1000
         result.MaxRequestMessageSize = 65536
         self.nonce = create_nonce(32)
         result.ServerNonce = self.nonce
@@ -67,9 +72,9 @@ class InternalSession:
     async def close_session(self, delete_subs=True):
         self.logger.info('close session %s', self.name)
         if self.state == SessionState.Activated:
-            InternalSession._current_connections -= 1
-        if InternalSession._current_connections < 0:
-            InternalSession._current_connections = 0
+            InternalSession._current_sessions -= 1
+        if InternalSession._current_sessions < 0:
+            InternalSession._current_sessions = 0
         self.state = SessionState.Closed
         await self.delete_subscriptions(self.subscriptions)
 
@@ -78,14 +83,14 @@ class InternalSession:
         result = ua.ActivateSessionResult()
         if self.state != SessionState.Created:
             raise ServiceError(ua.StatusCodes.BadSessionIdInvalid)
-        if InternalSession._current_connections >= InternalSession.max_connections:
-            raise ServiceError(ua.StatusCodes.BadMaxConnectionsReached)
+        if InternalSession._current_sessions >= self.iserver._limits.MaxSessionsCount:
+            raise ServiceError(ua.StatusCodes.BadTooManySessions)
         self.nonce = create_nonce(32)
         result.ServerNonce = self.nonce
         for _ in params.ClientSoftwareCertificates:
             result.Results.append(ua.StatusCode())
         self.state = SessionState.Activated
-        InternalSession._current_connections += 1
+        InternalSession._current_sessions += 1
         id_token = params.UserIdentityToken
         # Check if security policy is supported
         if not isinstance(id_token, self.iserver.supported_tokens):

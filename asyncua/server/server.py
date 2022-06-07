@@ -12,6 +12,7 @@ from asyncua import ua
 from .binary_server_asyncio import BinaryServer
 from .internal_server import InternalServer
 from .event_generator import EventGenerator
+from .config import ServerLimits
 from ..client import Client
 from ..common.node import Node
 from ..common.subscription import Subscription
@@ -69,6 +70,7 @@ class Server:
     :ivar name:
     :ivar default_timeout: timeout in milliseconds for sessions and secure channel
     :ivar iserver: `InternalServer` instance
+    :ivar limits: `ServerLimits` instance otherwise default values are used
     :ivar bserver: binary protocol server `BinaryServer`
     :ivar nodes: shortcuts to common nodes - `Shortcuts` instance
     :ivar socket_address:
@@ -78,7 +80,7 @@ class Server:
         server listens on some internal IP.
     """
 
-    def __init__(self, iserver: InternalServer = None, user_manager=None):
+    def __init__(self, iserver: InternalServer = None, user_manager=None, limits: ServerLimits = None):
         self.endpoint = urlparse("opc.tcp://0.0.0.0:4840/freeopcua/server/")
         self._application_uri = "urn:freeopcua:python:server"
         self.product_uri = "urn:freeopcua.github.io:python:server"
@@ -103,6 +105,15 @@ class Server:
         self._permission_ruleset = None
         self._policyIDs = ["Anonymous", "Basic256Sha256", "Username"]
         self.certificate = None
+        # init limits
+        if limits is not None:
+            iserver._limits = limits
+        elif iserver._limits is not None:
+            limits = iserver._limits
+        else:
+            limits = ServerLimits()
+            iserver._limits = limits
+        self._limits = limits
 
     async def init(self, shelf_file=None):
         await self.iserver.init(shelf_file)
