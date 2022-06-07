@@ -52,6 +52,8 @@ class InternalSession:
         return await self.iserver.get_endpoints(params, sockname)
 
     async def create_session(self, params, sockname=None):
+        if InternalSession._current_sessions >= self.iserver._limits.MaxSessionsCount:
+            raise ServiceError(ua.StatusCodes.BadTooManySessions)
         self.logger.info('Create session request')
         result = ua.CreateSessionResult()
         result.SessionId = self.session_id
@@ -71,7 +73,7 @@ class InternalSession:
 
     async def close_session(self, delete_subs=True):
         self.logger.info('close session %s', self.name)
-        if self.state == SessionState.Activated:
+        if self.state == SessionState.Activated or self.state == SessionState.Created:
             InternalSession._current_sessions -= 1
         if InternalSession._current_sessions < 0:
             InternalSession._current_sessions = 0
@@ -83,8 +85,6 @@ class InternalSession:
         result = ua.ActivateSessionResult()
         if self.state != SessionState.Created:
             raise ServiceError(ua.StatusCodes.BadSessionIdInvalid)
-        if InternalSession._current_sessions >= self.iserver._limits.MaxSessionsCount:
-            raise ServiceError(ua.StatusCodes.BadTooManySessions)
         self.nonce = create_nonce(32)
         result.ServerNonce = self.nonce
         for _ in params.ClientSoftwareCertificates:
