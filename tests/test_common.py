@@ -1534,3 +1534,30 @@ async def test_sub_class(opc):
     val = await var.read_value()
     assert val == struct_with_sub
     assert val.DataSetSource == struct_with_sub.DataSetSource
+
+
+async def test_alias(opc):
+    '''
+    Testing renaming buildin datatypes like UInt32, str and test it in a struct
+    '''
+    idx = 4
+    parent = opc.opc.get_node(ua.ObjectIds.String)
+    dt_str = await parent.add_data_type(ua.NodeId(NamespaceIndex=idx), "MyString")
+
+    data_type, _ = await new_struct(opc.opc, idx, "MyAliasStruct", [
+        new_struct_field("MyStringType", dt_str),
+    ])
+    await opc.opc.load_data_type_definitions()
+    assert type(ua.MyString()) == ua.String
+    var = await opc.opc.nodes.objects.add_variable(idx, "AliasedString", '1234', datatype=dt_str.nodeid)
+    val = await var.read_value()
+    assert val == '1234'
+
+    v = ua.MyAliasStruct()
+    var = await opc.opc.nodes.objects.add_variable(idx, "AliasedStruct", v, datatype=data_type.nodeid)
+    val = await var.read_value()
+    assert val == v
+    v.MyStringType = '1234'
+    await var.write_value(v)
+    val = await var.read_value()
+    assert val == v
